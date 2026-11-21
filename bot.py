@@ -14,8 +14,7 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False) if TELEGRAM_TOKEN else Non
 client = genai.Client(api_key=GEMINI_KALIT) if GEMINI_KALIT else None
 app = Flask(__name__)
 
-# Eng tezkor model
-TEZKOR_MODEL = "gemini-2.5-flash"
+TEZKOR_MODEL = "gemini-3.1-flash-lite"
 
 ROLLAR = {
     "universal": ("🧠 Universal AI", "Sening isming Alpomish. O'zbek tilida aqlli, qisqa va do'stona javob ber. Seni Usmon yaratgan."),
@@ -24,7 +23,6 @@ ROLLAR = {
     "teacher": ("📚 Maktab ustozi", "Sen mehribon ustozsan. Matematika, fizika va boshqa fanlardan misollarni qadamma-qadam yechib tushuntir.")
 }
 
-# Optimizatsiya qilingan xotira (faqat oxirgi 6 ta xabar saqlanadi)
 xotira_bazasi = {}
 joriy_rol = {}
 foydalanuvchilar = set()
@@ -42,12 +40,10 @@ def inline_menyu():
 
 def tezkor_javob_olish(user_id, yangi_matn):
     rol_kodi = joriy_rol.get(user_id, "universal")
+    xarakter_matni = ROLLAR[rol_kodi]
     tarix = xotira_bazasi.get(user_id, [])
     
-    # Yangi xabarni tarixga qo'shamiz
     tarix.append(gemini_types.Content(role="user", parts=[gemini_types.Part.from_text(text=yangi_matn)]))
-    
-    # Xotira og'irlashmasligi uchun faqat oxirgi 6 ta xabarni qoldiramiz
     if len(tarix) > 6:
         tarix = tarix[-6:]
 
@@ -55,12 +51,10 @@ def tezkor_javob_olish(user_id, yangi_matn):
         model=TEZKOR_MODEL,
         contents=tarix,
         config=gemini_types.GenerateContentConfig(
-            system_instruction=ROLLAR[rol_kodi][1],
-            thinking_config=gemini_types.ThinkingConfig(thinking_budget=0) # O'ylash vaqtini 0 ga tushirib maksimal tezlashtiradi
+            system_instruction=xarakter_matni
         )
     )
     
-    # Bot javobini ham tarixga saqlaymiz
     tarix.append(gemini_types.Content(role="model", parts=[gemini_types.Part.from_text(text=javob.text)]))
     xotira_bazasi[user_id] = tarix[-6:]
     return javob.text
@@ -96,7 +90,7 @@ if bot:
             tanlangan = call.data.replace("rol_", "")
             joriy_rol[user_id] = tanlangan
             xotira_bazasi.pop(user_id, None)
-            rol_nomi = ROLLAR[tanlangan][0]
+            rol_nomi = ROLLAR[tanlangan]
             bot.answer_callback_query(call.id, f"{rol_nomi} rejimi yoqildi!")
             bot.edit_message_text(
                 chat_id=user_id,
@@ -123,10 +117,7 @@ if bot:
             javob = client.models.generate_content(
                 model=TEZKOR_MODEL,
                 contents=[gemini_types.Part.from_bytes(data=rasm_baytlari, mime_type="image/jpeg"), izoh],
-                config=gemini_types.GenerateContentConfig(
-                    system_instruction=ROLLAR[rol_kodi][1],
-                    thinking_config=gemini_types.ThinkingConfig(thinking_budget=0)
-                )
+                config=gemini_types.GenerateContentConfig(system_instruction=ROLLAR[rol_kodi])
             )
             bot.reply_to(xabar, f"🖼 **Rasm tahlili:**\n\n{javob.text}", parse_mode="Markdown")
         except Exception:
@@ -144,10 +135,7 @@ if bot:
             javob = client.models.generate_content(
                 model=TEZKOR_MODEL,
                 contents=[gemini_types.Part.from_bytes(data=ovoz_baytlari, mime_type="audio/ogg"), "Ovozli xabarni tingla va o'zbek tilida javob ber."],
-                config=gemini_types.GenerateContentConfig(
-                    system_instruction=ROLLAR[rol_kodi][1],
-                    thinking_config=gemini_types.ThinkingConfig(thinking_budget=0)
-                )
+                config=gemini_types.GenerateContentConfig(system_instruction=ROLLAR[rol_kodi])
             )
             bot.reply_to(xabar, f"🎙️ **Ovozli xabarga javob:**\n\n{javob.text}", parse_mode="Markdown")
         except Exception:
@@ -161,8 +149,8 @@ if bot:
         try:
             natija = tezkor_javob_olish(user_id, xabar.text)
             bot.reply_to(xabar, natija)
-        except Exception:
-            bot.reply_to(xabar, "⏳ Biroz bandman, qayta yozib ko'ring!")
+        except Exception as e:
+            bot.reply_to(xabar, f"Xatolik: {str(e)[:120]}")
 
 @app.route('/webhook', methods=['POST'])
 def getMessage():
