@@ -14,119 +14,135 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False) if TELEGRAM_TOKEN else Non
 client = genai.Client(api_key=GEMINI_KALIT) if GEMINI_KALIT else None
 app = Flask(__name__)
 
-XARAKTER = """
-Sening isming Alpomish. Sen O'zbekistonda yaratilgan aqlli, hazilkash va ko'p qirrali sun'iy intellektsan.
-Har doim o'zbek tilida, do'stona, aniq va tushunarli javob ber. Seni Usmon yaratgan.
-"""
+# Turli dizayn va rollar
+ROLLAR = {
+    "universal": ("🧠 Universal AI", "Sening isming Alpomish. O'zbek tilida aqlli, qisqa va do'stona javob ber. Seni Usmon yaratgan."),
+    "english": ("🇬🇧 Ingliz tili ustozi", "Sen tajribali ingliz tili o'qituvchisisiz. Foydalanuvchiga ingliz tilini o'zbek tilida oson tushuntir, xatolarini to'g'rila."),
+    "coder": ("💻 Dasturchi", "Sen kuchli Python va dasturlash mutaxassisisiz. Kodlarni aniq, tushunarli va o'zbek tilida tushuntirib ber."),
+    "teacher": ("📚 Maktab ustozi", "Sen mehribon ustozsan. Matematika, fizika va boshqa fanlardan misollarni qadamma-qadam yechib tushuntir.")
+}
 
 chatlar = {}
-foydalanuvchilar = set() # Botga kirgan odamlar ro'yxati
+joriy_rol = {}
+foydalanuvchilar = set()
 
-def menyu_tugmalari():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("🔄 Yangi suhbat", "ℹ️ Imkoniyatlarim")
+# Xabar ostidagi chiroyli Inline tugmalar
+def inline_menyu():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    tugma1 = types.InlineKeyboardButton("🧠 Universal AI", callback_data="rol_universal")
+    tugma2 = types.InlineKeyboardButton("🇬🇧 Ingliz tili", callback_data="rol_english")
+    tugma3 = types.InlineKeyboardButton("💻 Dasturchi", callback_data="rol_coder")
+    tugma4 = types.InlineKeyboardButton("📚 Maktab ustozi", callback_data="rol_teacher")
+    tugma5 = types.InlineKeyboardButton("🔄 Suhbatni yangilash", callback_data="yangi_suhbat")
+    markup.add(tugma1, tugma2, tugma3, tugma4)
+    markup.add(tugma5)
     return markup
 
 def chatni_olish(user_id):
+    rol_kodi = joriy_rol.get(user_id, "universal")
     if user_id not in chatlar:
         chatlar[user_id] = client.chats.create(
             model="gemini-3.1-flash-lite",
-            config=gemini_types.GenerateContentConfig(system_instruction=XARAKTER)
+            config=gemini_types.GenerateContentConfig(system_instruction=ROLLAR[rol_kodi][1])
         )
     return chatlar[user_id]
 
 if bot:
-    @bot.message_handler(commands=['start'])
+    @bot.message_handler(commands=['start', 'mode'])
     def salomlashish(xabar):
         foydalanuvchilar.add(xabar.chat.id)
         chatlar.pop(xabar.chat.id, None)
-        bot.send_message(
-            xabar.chat.id,
-            "Assalomu alaykum! Men **Alpomish**man — yangilangan super versiya!\n\n"
-            "✍️ Matn yozing\n"
-            "📸 Rasm yuboring (misol yechaman yoki tahlil qilaman)\n"
-            "🎙️ Ovozli xabar yuboring (eshitib javob beraman)",
-            parse_mode="Markdown",
-            reply_markup=menyu_tugmalari()
+        matn = (
+            "╔══════════════════════╗\n"
+            "     ✨ **ALPOMISH AI** ✨\n"
+            "╚══════════════════════╝\n\n"
+            "Assalomu alaykum! Men sizning shaxsiy sun'iy intellekt yordamchingizman.\n\n"
+            "📸 **Rasm** yuboring — tahlil qilaman\n"
+            "🎙️ **Ovoz** yuboring — eshitib javob beraman\n"
+            "✍️ **Savol** yozing — bir soniyada javob olasiz\n\n"
+            "👇 *Quyidan menga kerakli rolni tanlang:*"
         )
+        bot.send_message(xabar.chat.id, matn, parse_mode="Markdown", reply_markup=inline_menyu())
+
+    @bot.message_handler(commands=['new'])
+    def yangi_suhbat_cmd(xabar):
+        chatlar.pop(xabar.chat.id, None)
+        bot.reply_to(xabar, "🧹 **Suhbat xotirasi tozalandi!** Yangi mavzuda yozishingiz mumkin.", parse_mode="Markdown")
 
     @bot.message_handler(commands=['stat'])
     def statistika(xabar):
-        bot.reply_to(xabar, f"📊 **Bot statistikasi:**\n\nFaol foydalanuvchilar soni: **{len(foydalanuvchilar)} ta**", parse_mode="Markdown")
+        bot.reply_to(xabar, f"📊 **Statistika:**\n👥 Foydalanuvchilar: **{len(foydalanuvchilar)} ta**", parse_mode="Markdown")
 
-    # 1. RASMLARNI KO'RISH VA TAHLIL QILISH
+    # Inline tugmalar bosilganda ishlaydigan qism
+    @bot.callback_query_handler(func=lambda call: True)
+    def tugma_bosilganda(call):
+        user_id = call.message.chat.id
+        if call.data.startswith("rol_"):
+            tanlangan = call.data.replace("rol_", "")
+            joriy_rol[user_id] = tanlangan
+            chatlar.pop(user_id, None)
+            rol_nomi = ROLLAR[tanlangan][0]
+            bot.answer_callback_query(call.id, f"{rol_nomi} rejimi yoqildi!")
+            bot.edit_message_text(
+                chat_id=user_id,
+                message_id=call.message.message_id,
+                text=f"✅ Tanlangan rejim: **{rol_nomi}**\n\nEndi savolingizni yozing, rasm yoki ovoz yuboring:",
+                parse_mode="Markdown",
+                reply_markup=inline_menyu()
+            )
+        elif call.data == "yangi_suhbat":
+            chatlar.pop(user_id, None)
+            bot.answer_callback_query(call.id, "Xotira tozalandi!")
+            bot.send_message(user_id, "🧹 **Xotira tozalandi!** Yangi savolingizni yozing:", parse_mode="Markdown")
+
     @bot.message_handler(content_types=['photo'])
     def rasm_tahlili(xabar):
-        foydalanuvchilar.add(xabar.chat.id)
-        bot.send_chat_action(xabar.chat.id, 'typing')
+        user_id = xabar.chat.id
+        foydalanuvchilar.add(user_id)
+        bot.send_chat_action(user_id, 'typing')
+        rol_kodi = joriy_rol.get(user_id, "universal")
         try:
             file_info = bot.get_file(xabar.photo[-1].file_id)
             rasm_baytlari = bot.download_file(file_info.file_path)
             izoh = xabar.caption if xabar.caption else "Bu rasmda nima tasvirlangan? O'zbek tilida batafsil tushuntirib ber."
-
             javob = client.models.generate_content(
                 model="gemini-3.1-flash-lite",
-                contents=[
-                    gemini_types.Part.from_bytes(data=rasm_baytlari, mime_type="image/jpeg"),
-                    izoh
-                ],
-                config=gemini_types.GenerateContentConfig(system_instruction=XARAKTER)
+                contents=[gemini_types.Part.from_bytes(data=rasm_baytlari, mime_type="image/jpeg"), izoh],
+                config=gemini_types.GenerateContentConfig(system_instruction=ROLLAR[rol_kodi][1])
             )
-            bot.reply_to(xabar, javob.text)
-        except Exception as e:
-            bot.reply_to(xabar, "Rasmni tahlil qilishda biroz xatolik bo'ldi, qayta yuborib ko'ring!")
+            bot.reply_to(xabar, f"🖼 **Rasm tahlili:**\n\n{javob.text}", parse_mode="Markdown")
+        except Exception:
+            bot.reply_to(xabar, "⚠️ Rasmni tahlil qilishda xatolik bo'ldi, qayta yuboring.")
 
-    # 2. OVOZLI XABARLARNI ESHITISH VA JAVOB BERISH
     @bot.message_handler(content_types=['voice'])
     def ovoz_tahlili(xabar):
-        foydalanuvchilar.add(xabar.chat.id)
-        bot.send_chat_action(xabar.chat.id, 'typing')
+        user_id = xabar.chat.id
+        foydalanuvchilar.add(user_id)
+        bot.send_chat_action(user_id, 'typing')
+        rol_kodi = joriy_rol.get(user_id, "universal")
         try:
             file_info = bot.get_file(xabar.voice.file_id)
             ovoz_baytlari = bot.download_file(file_info.file_path)
-
             javob = client.models.generate_content(
                 model="gemini-3.1-flash-lite",
-                contents=[
-                    gemini_types.Part.from_bytes(data=ovoz_baytlari, mime_type="audio/ogg"),
-                    "Foydalanuvchining ovozli xabarini tingla va unga o'zbek tilida aqlli javob ber."
-                ],
-                config=gemini_types.GenerateContentConfig(system_instruction=XARAKTER)
+                contents=[gemini_types.Part.from_bytes(data=ovoz_baytlari, mime_type="audio/ogg"), "Ovozli xabarni tingla va o'zbek tilida javob ber."],
+                config=gemini_types.GenerateContentConfig(system_instruction=ROLLAR[rol_kodi][1])
             )
-            bot.reply_to(xabar, javob.text)
-        except Exception as e:
-            bot.reply_to(xabar, "Ovozli xabarni eshitishda biroz xatolik bo'ldi, qayta yuboring!")
+            bot.reply_to(xabar, f"🎙️ **Ovozli xabarga javob:**\n\n{javob.text}", parse_mode="Markdown")
+        except Exception:
+            bot.reply_to(xabar, "⚠️ Ovozli xabarni eshitishda xatolik bo'ldi.")
 
-    # 3. MATNLI XABARLAR VA TUGMALAR
     @bot.message_handler(func=lambda message: True)
     def javob_berish(xabar):
         user_id = xabar.chat.id
         foydalanuvchilar.add(user_id)
-        matn = xabar.text
-
-        if matn == "🔄 Yangi suhbat":
-            chatlar.pop(user_id, None)
-            bot.reply_to(xabar, "Xotira tozalandi! Yangi mavzuda suhbatlashamiz.")
-            return
-
-        if matn == "ℹ️ Imkoniyatlarim":
-            bot.reply_to(
-                xabar,
-                "Men Usmon yaratgan **Alpomish AI** man:\n"
-                "• Istalgan savolga javob beraman va suhbatni eslab qolaman\n"
-                "• Yuborgan rasmlaringizni ko'rib tahlil qilaman\n"
-                "• Ovozli xabarlaringizni eshitib javob qaytaraman",
-                parse_mode="Markdown"
-            )
-            return
-
         bot.send_chat_action(user_id, 'typing')
         try:
             chat = chatni_olish(user_id)
-            javob = chat.send_message(matn)
+            javob = chat.send_message(xabar.text)
             bot.reply_to(xabar, javob.text)
-        except Exception as e:
-            bot.reply_to(xabar, "Biroz bandman, qayta yozib ko'ring!")
+        except Exception:
+            bot.reply_to(xabar, "⏳ Biroz bandman, qayta yozib ko'ring!")
 
 @app.route('/webhook', methods=['POST'])
 def getMessage():
@@ -138,7 +154,7 @@ def getMessage():
 
 @app.route("/")
 def home():
-    return "Alpomish Super AI 24/7 ishlamoqda!", 200
+    return "Alpomish Dizayn AI 24/7 ishlamoqda!", 200
 
 def avtomatik_ulash():
     time.sleep(3)
