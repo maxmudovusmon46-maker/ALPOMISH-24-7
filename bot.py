@@ -16,11 +16,18 @@ app = Flask(__name__)
 
 TEZKOR_MODEL = "gemini-3.1-flash-lite"
 
-ROLLAR = {
-    "universal": ("🧠 Universal AI", "Sening isming Alpomish. O'zbek tilida aqlli, qisqa va do'stona javob ber. Seni Usmon yaratgan."),
-    "english": ("🇬🇧 Ingliz tili ustozi", "Sen tajribali ingliz tili o'qituvchisisiz. Foydalanuvchiga ingliz tilini o'zbek tilida oson tushuntir, xatolarini to'g'rila."),
-    "coder": ("💻 Dasturchi", "Sen kuchli Python va dasturlash mutaxassisisiz. Kodlarni aniq, tushunarli va o'zbek tilida tushuntirib ber."),
-    "teacher": ("📚 Maktab ustozi", "Sen mehribon ustozsan. Matematika, fizika va boshqa fanlardan misollarni qadamma-qadam yechib tushuntir.")
+ROL_NOMLARI = {
+    "universal": "🧠 Universal AI",
+    "english": "🇬🇧 Ingliz tili ustozi",
+    "coder": "💻 Dasturchi",
+    "teacher": "📚 Maktab ustozi"
+}
+
+ROL_MATNLARI = {
+    "universal": "Sening isming Alpomish. O'zbek tilida aqlli, qisqa va do'stona javob ber. Seni Usmon yaratgan.",
+    "english": "Sen tajribali ingliz tili o'qituvchisisiz. Foydalanuvchiga ingliz tilini o'zbek tilida oson tushuntir, xatolarini to'g'rila.",
+    "coder": "Sen kuchli Python va dasturlash mutaxassisisiz. Kodlarni aniq, tushunarli va o'zbek tilida tushuntirib ber.",
+    "teacher": "Sen mehribon ustozsan. Matematika, fizika va boshqa fanlardan misollarni qadamma-qadam yechib tushuntir."
 }
 
 xotira_bazasi = {}
@@ -40,7 +47,7 @@ def inline_menyu():
 
 def tezkor_javob_olish(user_id, yangi_matn):
     rol_kodi = joriy_rol.get(user_id, "universal")
-    xarakter_matni = ROLLAR[rol_kodi]
+    xarakter = ROL_MATNLARI.get(rol_kodi, ROL_MATNLARI["universal"])
     tarix = xotira_bazasi.get(user_id, [])
     
     tarix.append(gemini_types.Content(role="user", parts=[gemini_types.Part.from_text(text=yangi_matn)]))
@@ -51,7 +58,7 @@ def tezkor_javob_olish(user_id, yangi_matn):
         model=TEZKOR_MODEL,
         contents=tarix,
         config=gemini_types.GenerateContentConfig(
-            system_instruction=xarakter_matni
+            system_instruction=xarakter
         )
     )
     
@@ -90,7 +97,7 @@ if bot:
             tanlangan = call.data.replace("rol_", "")
             joriy_rol[user_id] = tanlangan
             xotira_bazasi.pop(user_id, None)
-            rol_nomi = ROLLAR[tanlangan]
+            rol_nomi = ROL_NOMLARI.get(tanlangan, "🧠 Universal AI")
             bot.answer_callback_query(call.id, f"{rol_nomi} rejimi yoqildi!")
             bot.edit_message_text(
                 chat_id=user_id,
@@ -110,6 +117,7 @@ if bot:
         foydalanuvchilar.add(user_id)
         bot.send_chat_action(user_id, 'typing')
         rol_kodi = joriy_rol.get(user_id, "universal")
+        xarakter = ROL_MATNLARI.get(rol_kodi, ROL_MATNLARI["universal"])
         try:
             file_info = bot.get_file(xabar.photo[-1].file_id)
             rasm_baytlari = bot.download_file(file_info.file_path)
@@ -117,7 +125,7 @@ if bot:
             javob = client.models.generate_content(
                 model=TEZKOR_MODEL,
                 contents=[gemini_types.Part.from_bytes(data=rasm_baytlari, mime_type="image/jpeg"), izoh],
-                config=gemini_types.GenerateContentConfig(system_instruction=ROLLAR[rol_kodi])
+                config=gemini_types.GenerateContentConfig(system_instruction=xarakter)
             )
             bot.reply_to(xabar, f"🖼 **Rasm tahlili:**\n\n{javob.text}", parse_mode="Markdown")
         except Exception:
@@ -129,13 +137,14 @@ if bot:
         foydalanuvchilar.add(user_id)
         bot.send_chat_action(user_id, 'typing')
         rol_kodi = joriy_rol.get(user_id, "universal")
+        xarakter = ROL_MATNLARI.get(rol_kodi, ROL_MATNLARI["universal"])
         try:
             file_info = bot.get_file(xabar.voice.file_id)
             ovoz_baytlari = bot.download_file(file_info.file_path)
             javob = client.models.generate_content(
                 model=TEZKOR_MODEL,
                 contents=[gemini_types.Part.from_bytes(data=ovoz_baytlari, mime_type="audio/ogg"), "Ovozli xabarni tingla va o'zbek tilida javob ber."],
-                config=gemini_types.GenerateContentConfig(system_instruction=ROLLAR[rol_kodi])
+                config=gemini_types.GenerateContentConfig(system_instruction=xarakter)
             )
             bot.reply_to(xabar, f"🎙️ **Ovozli xabarga javob:**\n\n{javob.text}", parse_mode="Markdown")
         except Exception:
