@@ -14,7 +14,9 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False) if TELEGRAM_TOKEN else Non
 client = genai.Client(api_key=GEMINI_KALIT) if GEMINI_KALIT else None
 app = Flask(__name__)
 
-# Turli dizayn va rollar
+# Eng tezkor model
+TEZKOR_MODEL = "gemini-2.5-flash"
+
 ROLLAR = {
     "universal": ("🧠 Universal AI", "Sening isming Alpomish. O'zbek tilida aqlli, qisqa va do'stona javob ber. Seni Usmon yaratgan."),
     "english": ("🇬🇧 Ingliz tili ustozi", "Sen tajribali ingliz tili o'qituvchisisiz. Foydalanuvchiga ingliz tilini o'zbek tilida oson tushuntir, xatolarini to'g'rila."),
@@ -22,40 +24,54 @@ ROLLAR = {
     "teacher": ("📚 Maktab ustozi", "Sen mehribon ustozsan. Matematika, fizika va boshqa fanlardan misollarni qadamma-qadam yechib tushuntir.")
 }
 
-chatlar = {}
+# Optimizatsiya qilingan xotira (faqat oxirgi 6 ta xabar saqlanadi)
+xotira_bazasi = {}
 joriy_rol = {}
 foydalanuvchilar = set()
 
-# Xabar ostidagi chiroyli Inline tugmalar
 def inline_menyu():
     markup = types.InlineKeyboardMarkup(row_width=2)
-    tugma1 = types.InlineKeyboardButton("🧠 Universal AI", callback_data="rol_universal")
-    tugma2 = types.InlineKeyboardButton("🇬🇧 Ingliz tili", callback_data="rol_english")
-    tugma3 = types.InlineKeyboardButton("💻 Dasturchi", callback_data="rol_coder")
-    tugma4 = types.InlineKeyboardButton("📚 Maktab ustozi", callback_data="rol_teacher")
-    tugma5 = types.InlineKeyboardButton("🔄 Suhbatni yangilash", callback_data="yangi_suhbat")
-    markup.add(tugma1, tugma2, tugma3, tugma4)
-    markup.add(tugma5)
+    markup.add(
+        types.InlineKeyboardButton("🧠 Universal AI", callback_data="rol_universal"),
+        types.InlineKeyboardButton("🇬🇧 Ingliz tili", callback_data="rol_english"),
+        types.InlineKeyboardButton("💻 Dasturchi", callback_data="rol_coder"),
+        types.InlineKeyboardButton("📚 Maktab ustozi", callback_data="rol_teacher")
+    )
+    markup.add(types.InlineKeyboardButton("🔄 Suhbatni yangilash", callback_data="yangi_suhbat"))
     return markup
 
-def chatni_olish(user_id):
+def tezkor_javob_olish(user_id, yangi_matn):
     rol_kodi = joriy_rol.get(user_id, "universal")
-    if user_id not in chatlar:
-        chatlar[user_id] = client.chats.create(
-            model="gemini-3.1-flash-lite",
-            config=gemini_types.GenerateContentConfig(system_instruction=ROLLAR[rol_kodi][1])
+    tarix = xotira_bazasi.get(user_id, [])
+    
+    # Yangi xabarni tarixga qo'shamiz
+    tarix.append(gemini_types.Content(role="user", parts=[gemini_types.Part.from_text(text=yangi_matn)]))
+    
+    # Xotira og'irlashmasligi uchun faqat oxirgi 6 ta xabarni qoldiramiz
+    if len(tarix) > 6:
+        tarix = tarix[-6:]
+
+    javob = client.models.generate_content(
+        model=TEZKOR_MODEL,
+        contents=tarix,
+        config=gemini_types.GenerateContentConfig(
+            system_instruction=ROLLAR[rol_kodi][1],
+            thinking_config=gemini_types.ThinkingConfig(thinking_budget=0) # O'ylash vaqtini 0 ga tushirib maksimal tezlashtiradi
         )
-    return chatlar[user_id]
+    )
+    
+    # Bot javobini ham tarixga saqlaymiz
+    tarix.append(gemini_types.Content(role="model", parts=[gemini_types.Part.from_text(text=javob.text)]))
+    xotira_bazasi[user_id] = tarix[-6:]
+    return javob.text
 
 if bot:
     @bot.message_handler(commands=['start', 'mode'])
     def salomlashish(xabar):
         foydalanuvchilar.add(xabar.chat.id)
-        chatlar.pop(xabar.chat.id, None)
+        xotira_bazasi.pop(xabar.chat.id, None)
         matn = (
-            "╔══════════════════════╗\n"
-            "     ✨ **ALPOMISH AI** ✨\n"
-            "╚══════════════════════╝\n\n"
+            "✨ **ALPOMISH AI (Tezkor versiya)** ✨\n\n"
             "Assalomu alaykum! Men sizning shaxsiy sun'iy intellekt yordamchingizman.\n\n"
             "📸 **Rasm** yuboring — tahlil qilaman\n"
             "🎙️ **Ovoz** yuboring — eshitib javob beraman\n"
@@ -66,21 +82,20 @@ if bot:
 
     @bot.message_handler(commands=['new'])
     def yangi_suhbat_cmd(xabar):
-        chatlar.pop(xabar.chat.id, None)
+        xotira_bazasi.pop(xabar.chat.id, None)
         bot.reply_to(xabar, "🧹 **Suhbat xotirasi tozalandi!** Yangi mavzuda yozishingiz mumkin.", parse_mode="Markdown")
 
     @bot.message_handler(commands=['stat'])
     def statistika(xabar):
         bot.reply_to(xabar, f"📊 **Statistika:**\n👥 Foydalanuvchilar: **{len(foydalanuvchilar)} ta**", parse_mode="Markdown")
 
-    # Inline tugmalar bosilganda ishlaydigan qism
     @bot.callback_query_handler(func=lambda call: True)
     def tugma_bosilganda(call):
         user_id = call.message.chat.id
         if call.data.startswith("rol_"):
             tanlangan = call.data.replace("rol_", "")
             joriy_rol[user_id] = tanlangan
-            chatlar.pop(user_id, None)
+            xotira_bazasi.pop(user_id, None)
             rol_nomi = ROLLAR[tanlangan][0]
             bot.answer_callback_query(call.id, f"{rol_nomi} rejimi yoqildi!")
             bot.edit_message_text(
@@ -91,7 +106,7 @@ if bot:
                 reply_markup=inline_menyu()
             )
         elif call.data == "yangi_suhbat":
-            chatlar.pop(user_id, None)
+            xotira_bazasi.pop(user_id, None)
             bot.answer_callback_query(call.id, "Xotira tozalandi!")
             bot.send_message(user_id, "🧹 **Xotira tozalandi!** Yangi savolingizni yozing:", parse_mode="Markdown")
 
@@ -106,9 +121,12 @@ if bot:
             rasm_baytlari = bot.download_file(file_info.file_path)
             izoh = xabar.caption if xabar.caption else "Bu rasmda nima tasvirlangan? O'zbek tilida batafsil tushuntirib ber."
             javob = client.models.generate_content(
-                model="gemini-3.1-flash-lite",
+                model=TEZKOR_MODEL,
                 contents=[gemini_types.Part.from_bytes(data=rasm_baytlari, mime_type="image/jpeg"), izoh],
-                config=gemini_types.GenerateContentConfig(system_instruction=ROLLAR[rol_kodi][1])
+                config=gemini_types.GenerateContentConfig(
+                    system_instruction=ROLLAR[rol_kodi][1],
+                    thinking_config=gemini_types.ThinkingConfig(thinking_budget=0)
+                )
             )
             bot.reply_to(xabar, f"🖼 **Rasm tahlili:**\n\n{javob.text}", parse_mode="Markdown")
         except Exception:
@@ -124,9 +142,12 @@ if bot:
             file_info = bot.get_file(xabar.voice.file_id)
             ovoz_baytlari = bot.download_file(file_info.file_path)
             javob = client.models.generate_content(
-                model="gemini-3.1-flash-lite",
+                model=TEZKOR_MODEL,
                 contents=[gemini_types.Part.from_bytes(data=ovoz_baytlari, mime_type="audio/ogg"), "Ovozli xabarni tingla va o'zbek tilida javob ber."],
-                config=gemini_types.GenerateContentConfig(system_instruction=ROLLAR[rol_kodi][1])
+                config=gemini_types.GenerateContentConfig(
+                    system_instruction=ROLLAR[rol_kodi][1],
+                    thinking_config=gemini_types.ThinkingConfig(thinking_budget=0)
+                )
             )
             bot.reply_to(xabar, f"🎙️ **Ovozli xabarga javob:**\n\n{javob.text}", parse_mode="Markdown")
         except Exception:
@@ -138,9 +159,8 @@ if bot:
         foydalanuvchilar.add(user_id)
         bot.send_chat_action(user_id, 'typing')
         try:
-            chat = chatni_olish(user_id)
-            javob = chat.send_message(xabar.text)
-            bot.reply_to(xabar, javob.text)
+            natija = tezkor_javob_olish(user_id, xabar.text)
+            bot.reply_to(xabar, natija)
         except Exception:
             bot.reply_to(xabar, "⏳ Biroz bandman, qayta yozib ko'ring!")
 
@@ -154,7 +174,7 @@ def getMessage():
 
 @app.route("/")
 def home():
-    return "Alpomish Dizayn AI 24/7 ishlamoqda!", 200
+    return "Alpomish Tezkor AI 24/7 ishlamoqda!", 200
 
 def avtomatik_ulash():
     time.sleep(3)
